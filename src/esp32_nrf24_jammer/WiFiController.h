@@ -16,6 +16,7 @@ public:
     const char* getSSID() const { return _ssid; }
     const char* getIP() const { return _ipAddr; }
     bool isRunning() const { return _running; }
+    bool isInitialized() const { return _initialized; }
 
 private:
     ESP32NRF24Jammer& _jammer;
@@ -24,6 +25,7 @@ private:
     const char* _password;
     char _ipAddr[16];
     bool _running;
+    bool _initialized;
     
     void setupRoutes();
     void handleRoot();
@@ -31,6 +33,7 @@ private:
     void handleJammingToggle();
     void handleSetChannel();
     void handleSetFrequencyStep();
+    void handleInit();
     void handleNotFound();
     
     String generateHTML();

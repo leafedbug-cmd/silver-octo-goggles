@@ -1,7 +1,7 @@
 #include "WiFiController.h"
 
 WiFiController::WiFiController(ESP32NRF24Jammer& jammer)
-    : _jammer(jammer), _server(80), _ssid(""), _password(""), _running(false) {
+    : _jammer(jammer), _server(80), _ssid(""), _password(""), _running(false), _initialized(false) {
     strcpy(_ipAddr, "192.168.4.1");
 }
 
