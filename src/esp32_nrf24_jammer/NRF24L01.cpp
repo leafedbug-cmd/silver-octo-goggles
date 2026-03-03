@@ -7,16 +7,16 @@
 #define REG_CONFIG     0x00
 
 NRF24L01::NRF24L01(uint8_t cePin, uint8_t csnPin, uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin)
-    : _cePin(cePin), _csnPin(csnPin), _sckPin(sckPin), _misoPin(misoPin), _mosiPin(mosiPin) {
+    : _cePin(cePin), _csnPin(csnPin), _sckPin(sckPin), _misoPin(misoPin), _mosiPin(mosiPin) {}
+
+bool NRF24L01::begin(void) {
     pinMode(_cePin, OUTPUT);
     pinMode(_csnPin, OUTPUT);
     digitalWrite(_cePin, LOW);
     digitalWrite(_csnPin, HIGH);
-    
-    SPI.begin(_sckPin, _misoPin, _mosiPin, -1);
-}
 
-bool NRF24L01::begin(void) {
+    SPI.begin(_sckPin, _misoPin, _mosiPin, -1);
+
     reset();
 
     delay(5);

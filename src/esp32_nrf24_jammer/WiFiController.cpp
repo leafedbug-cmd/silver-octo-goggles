@@ -8,13 +8,12 @@ WiFiController::WiFiController(ESP32NRF24Jammer& jammer)
 bool WiFiController::begin(const char* ssid, const char* password) {
     _ssid = ssid;
     _password = password;
-    
-    // Start WiFi AP mode
+
     WiFi.mode(WIFI_AP);
     
     Serial.print("Starting WiFi AP: ");
     Serial.println(_ssid);
-    
+
     if (!WiFi.softAP(_ssid, _password)) {
         Serial.println("Failed to start AP!");
         return false;

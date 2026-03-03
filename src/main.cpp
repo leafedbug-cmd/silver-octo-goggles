@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include "esp32_nrf24_jammer/esp32_nrf24_jammer.h"
 #include "esp32_nrf24_jammer/WiFiController.h"
+#include <WiFi.h>
 #include <SPI.h>
 
 #define LED_PIN     48  // ESP32 onboard LED (commonly pin 48)
@@ -19,12 +20,7 @@ void setup() {
     Serial.begin(115200);
     Serial.println("\n--- ESP32 nRF24L01 Jammer with WiFi ---");
 
-    if (!jammer.begin()) {
-        Serial.println("Radio module not found or initialization failed!");
-        Serial.println("LED and WiFi will still work.");
-    }
-
-    // Initialize WiFi Access Point
+    // Initialize WiFi Access Point first
     if (!wifi.begin(WIFI_SSID, WIFI_PASSWORD)) {
         Serial.println("Failed to start WiFi AP!");
     }
@@ -37,6 +33,18 @@ void setup() {
     Serial.print("IP Address: ");
     Serial.println(wifi.getIP());
     Serial.println("Connect from your phone and visit: http://192.168.4.1");
+
+    Serial.println("Waiting for first AP client to connect...");
+    while (WiFi.softAPgetStationNum() == 0) {
+        wifi.handleClient();
+        delay(100);
+    }
+    Serial.println("AP client connected. Continuing startup.");
+
+    if (!jammer.begin()) {
+        Serial.println("Radio module not found or initialization failed!");
+        Serial.println("LED and WiFi will still work.");
+    }
     
     Serial.println("\n=== Serial Commands ===");
     Serial.println("S - Toggle Jamming ON/OFF");
