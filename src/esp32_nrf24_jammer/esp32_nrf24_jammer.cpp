@@ -48,6 +48,8 @@ bool ESP32NRF24Jammer::begin(void) {
         delay(200);
         
         _radio.reset();
+        _radio.disableAutoAck();      // No ACK waiting
+        _radio.setMaxPower();         // Max TX power, 1Mbps
         _setChannelInternal(_currentChannel);
         
         return true;
@@ -58,8 +60,11 @@ bool ESP32NRF24Jammer::begin(void) {
 void ESP32NRF24Jammer::jammingOn(void) {
     if (!_isJamming && !_safeMode) {
         _radio.powerUp();
-        _radio.reset();
+        _radio.disableAutoAck();
+        _radio.setMaxPower();
+        _radio.enableCarrier();              // Continuous carrier wave
         _setChannelInternal(_currentChannel);
+        _radio.setCEHigh();                  // Hold CE high to transmit
         _isJamming = true;
         
         neopixelWrite(_ledPin, 255, 0, 0);  // Red indicates jamming active
@@ -68,6 +73,8 @@ void ESP32NRF24Jammer::jammingOn(void) {
 
 void ESP32NRF24Jammer::jammingOff(void) {
     if (_isJamming) {
+        _radio.setCELow();
+        _radio.disableCarrier();
         _radio.powerDown();
         _isJamming = false;
         neopixelWrite(_ledPin, 0, 255, 0);  // Green when idle
@@ -113,7 +120,10 @@ void ESP32NRF24Jammer::setChannel(uint16_t channel) {
 void ESP32NRF24Jammer::_setChannelInternal(uint16_t ch) {
     uint8_t rfch = static_cast<uint8_t>(ch);
 
+    // Briefly drop CE to change channel, then re-assert
+    _radio.setCELow();
     _radio.writeRegister(REG_RF_CH, rfch);   // Write channel to RF_CH register
-
-    _radio.pulseCE();
+    if (_isJamming) {
+        _radio.setCEHigh();   // Resume carrier on new channel
+    }
 }

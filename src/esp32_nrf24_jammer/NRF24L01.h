@@ -20,6 +20,13 @@ public:
     void writeRegister(uint8_t reg, uint8_t value);
     uint8_t readRegister(uint8_t reg);
     void pulseCE(void);
+    void setCEHigh(void);
+    void setCELow(void);
+
+    void enableCarrier(void);   // Enable continuous carrier wave
+    void disableCarrier(void);  // Disable continuous carrier wave
+    void disableAutoAck(void);  // Disable auto-acknowledgment on all pipes
+    void setMaxPower(void);     // Set max TX power and 1Mbps data rate
 
 private:
     uint8_t _cePin;

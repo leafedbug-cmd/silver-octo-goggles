@@ -2,9 +2,11 @@
 
 #include "NRF24L01.h"
 
-#define CMD_R_REGISTER 0x00
-#define CMD_W_REGISTER 0x20
-#define REG_CONFIG     0x00
+#define CMD_R_REGISTER  0x00
+#define CMD_W_REGISTER  0x20
+#define REG_CONFIG      0x00
+#define REG_EN_AA       0x01
+#define REG_RF_SETUP    0x06
 
 NRF24L01::NRF24L01(uint8_t cePin, uint8_t csnPin, uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin)
     : _cePin(cePin), _csnPin(csnPin), _sckPin(sckPin), _misoPin(misoPin), _mosiPin(mosiPin) {}
@@ -71,6 +73,40 @@ void NRF24L01::pulseCE(void) {
     delayMicroseconds(10);
     digitalWrite(_cePin, HIGH);
     delayMicroseconds(10);
+}
+
+void NRF24L01::setCEHigh(void) {
+    digitalWrite(_cePin, HIGH);
+}
+
+void NRF24L01::setCELow(void) {
+    digitalWrite(_cePin, LOW);
+}
+
+void NRF24L01::enableCarrier(void) {
+    // Set CONT_WAVE (bit 7) and PLL_LOCK (bit 4) in RF_SETUP
+    uint8_t rfSetup = readRegister(REG_RF_SETUP);
+    rfSetup |= 0x90;   // bit7 = CONT_WAVE, bit4 = PLL_LOCK
+    writeRegister(REG_RF_SETUP, rfSetup);
+}
+
+void NRF24L01::disableCarrier(void) {
+    uint8_t rfSetup = readRegister(REG_RF_SETUP);
+    rfSetup &= ~0x90;   // Clear CONT_WAVE and PLL_LOCK
+    writeRegister(REG_RF_SETUP, rfSetup);
+}
+
+void NRF24L01::disableAutoAck(void) {
+    writeRegister(REG_EN_AA, 0x00);
+}
+
+void NRF24L01::setMaxPower(void) {
+    // RF_SETUP: bits 2:1 = RF_PWR (11 = 0dBm max), bit 3 = RF_DR_HIGH
+    // Set 0dBm power, 1Mbps data rate
+    uint8_t rfSetup = readRegister(REG_RF_SETUP);
+    rfSetup |= 0x06;    // RF_PWR = 11 (max power)
+    rfSetup &= ~0x08;   // RF_DR_HIGH = 0 (1Mbps)
+    writeRegister(REG_RF_SETUP, rfSetup);
 }
 
 uint8_t NRF24L01::transfer(uint8_t val) {
