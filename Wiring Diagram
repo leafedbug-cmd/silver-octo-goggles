@@ -1,0 +1,13 @@
+NRF24L01      ESP32
+    VCC        3V3
+    GND        GND
+    CSN        D32  (IO32 / GPIO32)
+    CE         D38  (IO38 / GPIO38)
+    SCK        D40  (SCLK / GPIO40 - SPI2 CLK)
+    MOSI       D41  (MOSI / GPIO41 - SPI2 MISO)
+    MISO       D42  (MISO / GPIO42 - SPI2 DOUT)
+
+WS2812 LED   ESP32
+    VCC       3V3
+    GND       GND
+    DIN       D48  (IO48 / GPIO48 - LEDs)

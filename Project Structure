@@ -1,0 +1,11 @@
+esp32_nrf24_jammer/
+├── lib/
+│   └── esp32_nrf24_jammer/
+│       ├── esp32_nrf24_jammer.h
+│       ├── esp32_nrf24_jammer.cpp
+│       ├── NRF24L01.cpp  (modified library)
+│       └── NRF24L01.h    (modified header)
+├── src/
+│   └── main.cpp
+├── platformio.ini           (optional, for better IDE support)
+└── readme.md
