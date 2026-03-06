@@ -73,6 +73,99 @@ void NRF24L01::pulseCE(void) {
     delayMicroseconds(10);
 }
 
+void NRF24L01::setCEHigh(void) {
+    digitalWrite(_cePin, HIGH);
+}
+
+void NRF24L01::setCELow(void) {
+    digitalWrite(_cePin, LOW);
+}
+
+void NRF24L01::setMaxPower(void) {
+    // RF_SETUP: 5dBm power (bits 2:1 = 11), 2Mbps (bit 3 = 1)
+    writeRegister(0x06, 0x0F);  // 5dBm, 2Mbps, LNA gain
+}
+
+void NRF24L01::disableAutoAck(void) {
+    writeRegister(0x01, 0x00);  // EN_AA = 0 (disable auto-ack on all pipes)
+}
+
+void NRF24L01::setChannel(uint8_t ch) {
+    writeRegister(0x05, ch & 0x7F);  // RF_CH register, max 127
+}
+
+void NRF24L01::setRxMode(void) {
+    uint8_t config = readRegister(REG_CONFIG);
+    config |= 0x03;  // PWR_UP + PRIM_RX
+    writeRegister(REG_CONFIG, config);
+    setCEHigh();
+    delayMicroseconds(130);  // RX settling time
+}
+
+void NRF24L01::setTxMode(void) {
+    uint8_t config = readRegister(REG_CONFIG);
+    config |= 0x02;   // PWR_UP
+    config &= ~0x01;  // PRIM_RX = 0 (TX mode)
+    writeRegister(REG_CONFIG, config);
+}
+
+bool NRF24L01::detectSignal(void) {
+    // RPD register (0x09) - bit 0 indicates received power > -64dBm
+    return (readRegister(0x09) & 0x01) != 0;
+}
+
+void NRF24L01::scanAllChannels(uint8_t* results, int numSamples) {
+    disableAutoAck();
+    
+    for (int ch = 0; ch < 126; ch++) {
+        setChannel(ch);
+        int detected = 0;
+        
+        for (int s = 0; s < numSamples; s++) {
+            setRxMode();
+            delayMicroseconds(170);  // Listen briefly
+            if (detectSignal()) {
+                detected++;
+            }
+            setCELow();
+        }
+        
+        // Store as percentage (0-100)
+        results[ch] = (detected * 100) / numSamples;
+        
+        // Yield every 5 channels to let WiFi stack run and feed watchdog
+        if (ch % 5 == 0) {
+            yield();
+            delay(1);  // Feed watchdog timer
+        }
+    }
+}
+
 uint8_t NRF24L01::transfer(uint8_t val) {
     return SPI.transfer(val);
+}
+
+void NRF24L01::flushTx(void) {
+    digitalWrite(_csnPin, LOW);
+    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
+    transfer(0xE1);  // FLUSH_TX command
+    SPI.endTransaction();
+    digitalWrite(_csnPin, HIGH);
+}
+
+void NRF24L01::writeTxPayload(const uint8_t* data, uint8_t len) {
+    digitalWrite(_csnPin, LOW);
+    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
+    transfer(0xA0);  // W_TX_PAYLOAD command
+    for (uint8_t i = 0; i < len; i++) {
+        transfer(data[i]);
+    }
+    SPI.endTransaction();
+    digitalWrite(_csnPin, HIGH);
+}
+
+void NRF24L01::transmit(void) {
+    setCEHigh();
+    delayMicroseconds(15);  // Min CE high time for TX
+    setCELow();
 }

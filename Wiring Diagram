@@ -1,13 +1,25 @@
-NRF24L01      ESP32
+NRF24L01+     ESP32-S3
     VCC        3V3
     GND        GND
-    CSN        D32  (IO32 / GPIO32)
-    CE         D38  (IO38 / GPIO38)
-    SCK        D40  (SCLK / GPIO40 - SPI2 CLK)
-    MOSI       D41  (MOSI / GPIO41 - SPI2 MISO)
-    MISO       D42  (MISO / GPIO42 - SPI2 DOUT)
+    CSN        D10  (IO10 / GPIO10)
+    CE         D9   (IO9 / GPIO9)
+    SCK        D12  (IO12 / GPIO12)
+    MOSI       D11  (IO11 / GPIO11)
+    MISO       D13  (IO13 / GPIO13)
 
-WS2812 LED   ESP32
+WS2812 LED   ESP32-S3
     VCC       3V3
     GND       GND
-    DIN       D48  (IO48 / GPIO48 - LEDs)
+    DIN       D48  (IO48 / GPIO48 - RGB LED)
+
+JAM BUTTON   ESP32-S3
+    (Use onboard BOOT button on GPIO0, or wire external)
+    One leg    D0   (IO0 / GPIO0 - has internal pull-up)
+    Other leg  GND
+
+NOTES:
+- ESP32-S3-DevKitC-1-N16R8 (16MB Flash, 8MB PSRAM)
+- BOOT button (GPIO0) toggles jamming ON/OFF
+- Web UI at http://192.168.4.1 shows spectrum scanner only
+- LED colors: Cyan=startup, Green=idle, Blue=scanning, Red=jamming
+- OLD PINS (GPIO 40-42) CONFLICT WITH USB-JTAG - DO NOT USE

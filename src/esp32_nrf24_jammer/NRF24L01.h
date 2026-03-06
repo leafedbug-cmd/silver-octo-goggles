@@ -20,7 +20,19 @@ public:
     void writeRegister(uint8_t reg, uint8_t value);
     uint8_t readRegister(uint8_t reg);
     void pulseCE(void);
-
+    void setCEHigh(void);
+    void setCELow(void);
+    
+    // Scanner functions
+    void setRxMode(void);
+    void setTxMode(void);
+    void setMaxPower(void);  // 0dBm max output
+    void disableAutoAck(void);
+    void setChannel(uint8_t ch);
+    bool detectSignal(void);  // Check RPD register
+    void scanAllChannels(uint8_t* results, int numSamples = 100);    void flushTx(void);
+    void writeTxPayload(const uint8_t* data, uint8_t len);
+    void transmit(void);
 private:
     uint8_t _cePin;
     uint8_t _csnPin;
