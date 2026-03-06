@@ -1,11 +1,22 @@
-esp32_nrf24_jammer/
-├── lib/
-│   └── esp32_nrf24_jammer/
-│       ├── esp32_nrf24_jammer.h
-│       ├── esp32_nrf24_jammer.cpp
-│       ├── NRF24L01.cpp  (modified library)
-│       └── NRF24L01.h    (modified header)
+silver-octo-goggles/
 ├── src/
-│   └── main.cpp
-├── platformio.ini           (optional, for better IDE support)
-└── readme.md
+│   ├── main.cpp                     # Main application entry
+│   └── esp32_nrf24_jammer/
+│       ├── esp32_nrf24_jammer.h     # Jammer class header
+│       ├── esp32_nrf24_jammer.cpp   # Jammer implementation (jam, scan, LED)
+│       ├── NRF24L01.h               # NRF24L01+ radio driver header
+│       ├── NRF24L01.cpp             # Radio driver (SPI, scanning, TX)
+│       ├── WiFiController.h         # WiFi AP & Web UI header
+│       └── WiFiController.cpp       # Web server, API routes, HTML UI
+├── platformio.ini                   # Build config (ESP32-S3-N16R8)
+├── Wiring Diagram                   # Pin connections
+├── Project Structure                # This file
+└── README.md
+
+Features:
+- WiFi AP (nacho-wifi / password123) at 192.168.4.1
+- Web UI with spectrum analyzer and JAM button
+- Physical JAM button (GPIO0 / BOOT button)
+- Background 2.4GHz scanning on Core 1
+- 15-second jam burst with channel hopping
+- WS2812 LED status indicator

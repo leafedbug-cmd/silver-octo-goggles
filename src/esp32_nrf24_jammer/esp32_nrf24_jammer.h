@@ -20,8 +20,26 @@ public:
     bool isJamming(void);
     void updateLED(void);   // Refresh LED display
     
+    // Timed jamming
+    void startTimedJam(unsigned long durationMs);  // Jam for specified duration
+    void updateTimedJam(void);  // Call in loop to check timer
+    bool isTimedJamActive(void);
+    unsigned long getTimedJamRemaining(void);  // ms remaining
+    
+    // Aggressive jamming
+    void aggressiveJamBurst(void);  // Fast channel hopping burst
+    
+    // Background scanner
+    void startBackgroundScan(void);  // Start continuous background scanning
+    void stopBackgroundScan(void);   // Stop scanning (for jamming)
+    void getScanResults(uint8_t* results);  // Get latest cached scan results
+    bool isScanReady(void);  // Check if first scan complete
+    
     void setFrequencyStep(uint32_t stepHz);   // For continuous sweep (default 500kHz)
     void setChannel(uint16_t channel);      // Set single channel (0-124)
+
+    // Internal - called by task
+    void _scanTask(void);
 
 private:
     uint8_t _ledPin;
@@ -33,6 +51,18 @@ private:
     uint16_t _currentChannel = 0;           // Current channel in sweep
     uint32_t _frequencyStepHz = 500000;      // Default step: 500kHz
     
+    // Timed jam state
+    bool _timedJamActive = false;
+    unsigned long _timedJamStart = 0;
+    unsigned long _timedJamDuration = 0;
+    
+    // Background scan state
+    uint8_t _scanResults[126];
+    volatile bool _scanRunning = false;
+    volatile bool _scanReady = false;
+    TaskHandle_t _scanTaskHandle = nullptr;
+    
     void _setChannelInternal(uint16_t ch);
+    void _configureAggressiveMode(void);
 };
 #endif  // ESP32_NRF24_JAMMER_H_

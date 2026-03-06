@@ -34,6 +34,7 @@ private:
     void handleSetChannel();
     void handleSetFrequencyStep();
     void handleInit();
+    void handleScan();
     void handleNotFound();
     
     String generateHTML();
