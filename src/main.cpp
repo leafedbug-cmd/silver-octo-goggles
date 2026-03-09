@@ -8,7 +8,8 @@
 #define LED_PIN     48  // ESP32 onboard WS2812 LED
 #define CSN_PIN     10  // Safe SPI CS pin
 #define CE_PIN      9   // Safe CE pin
-#define JAM_BUTTON  0   // GPIO0 = BOOT button on DevKitC (or wire external button)
+#define JAM_SWITCH_PIN 21   // External switch signal pin (kept free from nRF IRQ)
+#define JAM_SWITCH_ACTIVE_LEVEL LOW  // LOW when switch is ON (NO->pin, COM->GND)
 
 // WiFi credentials - change these!
 #define WIFI_SSID "nacho-wifi"
@@ -17,13 +18,33 @@
 ESP32NRF24Jammer jammer(LED_PIN, CSN_PIN, CE_PIN);
 WiFiController wifi(jammer);
 
+// Apply a desired jammer state and keep scan task / LED state aligned.
+static void setJamState(bool enable) {
+    if (enable) {
+        if (!jammer.isJamming()) {
+            jammer.stopBackgroundScan();
+            jammer.jammingOn();
+            Serial.println("Jamming ON (switch)");
+            neopixelWrite(LED_PIN, 255, 0, 0);  // Red
+        }
+    } else {
+        if (jammer.isJamming()) {
+            jammer.jammingOff();
+            jammer.startBackgroundScan();
+            Serial.println("Jamming OFF - scanning resumed (switch)");
+            neopixelWrite(LED_PIN, 0, 255, 0);  // Green
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
-    delay(100);
-    Serial.println("\n\n===== FIRMWARE v2 =====");  // Version marker
+    // Wait for USB-CDC to enumerate so serial monitor catches all output
+    delay(2000);
+    Serial.println("\n\n===== FIRMWARE v3 =====");  // Version marker
     
-    // Setup JAM button with internal pull-up
-    pinMode(JAM_BUTTON, INPUT_PULLUP);
+    // External 3-pin switch input: NO->GPIO21, COM->GND, NC unused.
+    pinMode(JAM_SWITCH_PIN, INPUT_PULLUP);
     
     // Show startup LED color (cyan) immediately
     neopixelWrite(LED_PIN, 0, 100, 100);  // Cyan = waiting for init
@@ -49,6 +70,9 @@ void setup() {
     Serial.print("IP Address: ");
     Serial.println(wifi.getIP());
     Serial.println("Connect from your phone and visit: http://192.168.4.1");
+    Serial.printf("External switch pin: GPIO%d, active level: %s\n",
+        JAM_SWITCH_PIN,
+        (JAM_SWITCH_ACTIVE_LEVEL == LOW) ? "LOW" : "HIGH");
     
     // Give WiFi time to stabilize before initializing radio
     delay(500);
@@ -67,20 +91,27 @@ void setup() {
         Serial.println("Background scanning started");
     }
     
-    Serial.println("\nPhysical BOOT button toggles jamming ON/OFF");
+    Serial.println("\nExternal switch controls jamming ON/OFF");
     neopixelWrite(LED_PIN, 0, 255, 0);  // Green = ready
+
+    // Respect physical switch position at startup.
+    bool switchOn = (digitalRead(JAM_SWITCH_PIN) == JAM_SWITCH_ACTIVE_LEVEL);
+    setJamState(switchOn);
 }
 
 void loop() {
-    static bool lastButtonState = HIGH;
-    static unsigned long lastDebounce = 0;
+    static bool rawSwitchOn = false;
+    static bool lastRawSwitchOn = false;
+    static bool debouncedSwitchOn = false;
+    static unsigned long lastRawChange = 0;
     static unsigned long lastPrint = 0;
 
     // Handle WiFi requests
     wifi.handleClient();
     
-    // Physical JAM button - toggle jam on/off
-    bool buttonState = digitalRead(JAM_BUTTON);
+    // Physical JAM switch - maintain ON/OFF state
+    bool switchState = digitalRead(JAM_SWITCH_PIN);
+    rawSwitchOn = (switchState == JAM_SWITCH_ACTIVE_LEVEL);
     
     // Heartbeat debug every 10 seconds
     if (millis() - lastPrint > 10000) {
@@ -89,22 +120,16 @@ void loop() {
             ESP.getFreeHeap() / 1024, jammer.isJamming() ? "ON" : "OFF");
     }
     
-    if (buttonState == LOW && lastButtonState == HIGH && (millis() - lastDebounce > 250)) {
-        lastDebounce = millis();
-        Serial.println(">>> BUTTON PRESSED! <<<");
-        if (jammer.isJamming()) {
-            jammer.jammingOff();
-            jammer.startBackgroundScan();
-            Serial.println("Jamming OFF - scanning resumed");
-            neopixelWrite(LED_PIN, 0, 255, 0);  // Green
-        } else {
-            jammer.stopBackgroundScan();
-            jammer.jammingOn();
-            Serial.println("Jamming ON");
-            neopixelWrite(LED_PIN, 255, 0, 0);  // Red
-        }
+    // Debounce and apply switch position.
+    if (rawSwitchOn != lastRawSwitchOn) {
+        lastRawSwitchOn = rawSwitchOn;
+        lastRawChange = millis();
     }
-    lastButtonState = buttonState;
+
+    if ((millis() - lastRawChange) > 35 && rawSwitchOn != debouncedSwitchOn) {
+        debouncedSwitchOn = rawSwitchOn;
+        setJamState(debouncedSwitchOn);
+    }
 
     // Continuous jam burst while jamming
     if (jammer.isJamming()) {

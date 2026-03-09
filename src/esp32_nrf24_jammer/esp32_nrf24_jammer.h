@@ -64,5 +64,6 @@ private:
     
     void _setChannelInternal(uint16_t ch);
     void _configureAggressiveMode(void);
+    void _printRegisters(const char* label);  // Dump key registers to Serial
 };
 #endif  // ESP32_NRF24_JAMMER_H_

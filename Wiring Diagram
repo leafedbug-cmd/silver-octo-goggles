@@ -12,14 +12,15 @@ WS2812 LED   ESP32-S3
     GND       GND
     DIN       D48  (IO48 / GPIO48 - RGB LED)
 
-JAM BUTTON   ESP32-S3
-    (Use onboard BOOT button on GPIO0, or wire external)
-    One leg    D0   (IO0 / GPIO0 - has internal pull-up)
-    Other leg  GND
+3-PIN SWITCH (SPDT)   ESP32-S3
+    COM                  GND
+    NO                   D21  (IO21 / GPIO21)
+    NC                   Not connected
+    Firmware expects LOW on GPIO21 = switch ON (jamming)
 
 NOTES:
 - ESP32-S3-DevKitC-1-N16R8 (16MB Flash, 8MB PSRAM)
-- BOOT button (GPIO0) toggles jamming ON/OFF
+- External switch on GPIO21 controls jamming ON/OFF
 - Web UI at http://192.168.4.1 shows spectrum scanner only
 - LED colors: Cyan=startup, Green=idle, Blue=scanning, Red=jamming
 - OLD PINS (GPIO 40-42) CONFLICT WITH USB-JTAG - DO NOT USE
