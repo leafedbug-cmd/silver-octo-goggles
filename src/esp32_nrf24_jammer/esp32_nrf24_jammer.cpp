@@ -30,6 +30,47 @@
 #define REG_RX_PW_P5     0x16
 #define REG_FIFO_STATUS  0x17
 
+// Channel hopping mode for aggressive burst.
+// 0 = all channels (0-125), 1 = even channels only, 2 = odd channels only
+#define JAM_CHANNEL_MODE 2
+// 1 = print every hopped channel to Serial, 0 = periodic TX health only
+#define JAM_LOG_EVERY_CHANNEL 0
+
+// Read internal ESP32 temperature in deci-Celsius for compact payload encoding.
+static int16_t readChipTempC10() {
+    float tC = temperatureRead();
+    return static_cast<int16_t>(tC * 10.0f);
+}
+
+static uint8_t nextJamChannel(uint8_t current) {
+#if JAM_CHANNEL_MODE == 1
+    // Even-only channels: 0,2,4,...,124
+    uint8_t ch = current;
+    if (ch & 0x01) {
+        ch = static_cast<uint8_t>(ch - 1);
+    }
+    ch = static_cast<uint8_t>(ch + 2);
+    if (ch >= 126) {
+        ch = 0;
+    }
+    return ch;
+#elif JAM_CHANNEL_MODE == 2
+    // Odd-only channels: 1,3,5,...,125
+    uint8_t ch = current;
+    if ((ch & 0x01) == 0) {
+        ch = static_cast<uint8_t>(ch + 1);
+    }
+    ch = static_cast<uint8_t>(ch + 2);
+    if (ch >= 126) {
+        ch = 1;
+    }
+    return ch;
+#else
+    // All channels with stride 3.
+    return static_cast<uint8_t>((current + 3) % 126);
+#endif
+}
+
 ESP32NRF24Jammer::ESP32NRF24Jammer(uint8_t ledPin, uint8_t csnPin, uint8_t cePin)
     : _ledPin(ledPin), _radio(cePin, csnPin, 12, 13, 11) {   // SCK=12, MISO=13, MOSI=11
 }
@@ -49,7 +90,6 @@ void ESP32NRF24Jammer::_printRegisters(const char* label) {
 
 bool ESP32NRF24Jammer::begin(void) {
     Serial.println("[nRF24] begin() starting...");
-    neopixelWrite(_ledPin, 0, 255, 0);
 
     if (_radio.begin()) {
         Serial.println("[nRF24] SPI contact OK - module responded");
@@ -166,8 +206,7 @@ void ESP32NRF24Jammer::updateTimedJam(void) {
         if (millis() - _timedJamStart >= _timedJamDuration) {
             jammingOff();
             _timedJamActive = false;
-            Serial.println("Timed jam completed, resuming scan");
-            startBackgroundScan();  // Resume scanning after jam
+            Serial.println("Timed jam completed");
         } else {
             // Aggressive channel hopping during timed jam
             aggressiveJamBurst();
@@ -199,10 +238,17 @@ void ESP32NRF24Jammer::aggressiveJamBurst(void) {
 
     static unsigned long lastBurstLog = 0;
     static uint32_t burstCount = 0;
+    int16_t tempC10 = readChipTempC10();
 
     for (int burst = 0; burst < 100; burst++) {
-        _currentChannel = (_currentChannel + 3) % 126;
+        _currentChannel = nextJamChannel(_currentChannel);
         _radio.writeRegister(REG_RF_CH, _currentChannel);
+#if JAM_LOG_EVERY_CHANNEL
+        Serial.printf("[nRF24 HOP] ch=%u\n", _currentChannel);
+#endif
+        // Stamp telemetry in payload: bytes 28-29 = signed deci-Celsius.
+        noise[28] = static_cast<uint8_t>((tempC10 >> 8) & 0xFF);
+        noise[29] = static_cast<uint8_t>(tempC10 & 0xFF);
         _radio.flushTx();
         _radio.writeTxPayload(noise, 32);
         _radio.transmit();
@@ -212,15 +258,15 @@ void ESP32NRF24Jammer::aggressiveJamBurst(void) {
     }
     burstCount++;
 
-    // Log TX health every 5 seconds while jamming
-    if (millis() - lastBurstLog > 5000) {
+    // Log TX health every 10 seconds while jamming
+    if (millis() - lastBurstLog > 10000) {
         lastBurstLog = millis();
         uint8_t status = _radio.readRegister(REG_STATUS);
         uint8_t fifo   = _radio.readRegister(REG_FIFO_STATUS);
         uint8_t observe = _radio.readRegister(REG_OBSERVE_TX);
         uint8_t config = _radio.readRegister(REG_CONFIG);
-        Serial.printf("[nRF24 TX] bursts=%u  STATUS=0x%02X  FIFO=0x%02X  OBSERVE=0x%02X  CONFIG=0x%02X  ch=%d\n",
-            burstCount, status, fifo, observe, config, _currentChannel);
+        Serial.printf("[nRF24 TX] bursts=%u  STATUS=0x%02X  FIFO=0x%02X  OBSERVE=0x%02X  CONFIG=0x%02X  ch=%d  temp=%.1fC\n",
+            burstCount, status, fifo, observe, config, _currentChannel, tempC10 / 10.0f);
         // Check for common problems
         if (!(config & 0x02)) {
             Serial.println("[nRF24 TX] WARNING: PWR_UP bit is 0 - radio may have reset!");
