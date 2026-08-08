@@ -5,9 +5,24 @@
 #define CMD_R_REGISTER 0x00
 #define CMD_W_REGISTER 0x20
 #define REG_CONFIG     0x00
+#define NRF24_SPI_FREQUENCY 4000000
 
-NRF24L01::NRF24L01(uint8_t cePin, uint8_t csnPin, uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin)
-    : _cePin(cePin), _csnPin(csnPin), _sckPin(sckPin), _misoPin(misoPin), _mosiPin(mosiPin) {}
+namespace {
+constexpr int kScanListenTimeUs = 260;
+constexpr int kRadioBootSettleMs = 8;
+}
+
+NRF24L01::NRF24L01(SPIClass& spi, uint8_t cePin, uint8_t csnPin, uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin)
+    : _spi(&spi), _cePin(cePin), _csnPin(csnPin), _sckPin(sckPin), _misoPin(misoPin), _mosiPin(mosiPin) {}
+
+void NRF24L01::configure(SPIClass& spi, uint8_t cePin, uint8_t csnPin, uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin) {
+    _spi = &spi;
+    _cePin = cePin;
+    _csnPin = csnPin;
+    _sckPin = sckPin;
+    _misoPin = misoPin;
+    _mosiPin = mosiPin;
+}
 
 bool NRF24L01::begin(void) {
     pinMode(_cePin, OUTPUT);
@@ -15,8 +30,9 @@ bool NRF24L01::begin(void) {
     digitalWrite(_cePin, LOW);
     digitalWrite(_csnPin, HIGH);
 
-    SPI.begin(_sckPin, _misoPin, _mosiPin, -1);
+    _spi->begin(_sckPin, _misoPin, _mosiPin, -1);
 
+    delay(kRadioBootSettleMs);
     reset();
 
     delay(5);
@@ -49,19 +65,19 @@ bool NRF24L01::isPresent(void) {
 
 void NRF24L01::writeRegister(uint8_t reg, uint8_t value) {
     digitalWrite(_csnPin, LOW);
-    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
+    _spi->beginTransaction(SPISettings(NRF24_SPI_FREQUENCY, MSBFIRST, SPI_MODE0));
     transfer(CMD_W_REGISTER | (reg & 0x1F));
     transfer(value);
-    SPI.endTransaction();
+    _spi->endTransaction();
     digitalWrite(_csnPin, HIGH);
 }
 
 uint8_t NRF24L01::readRegister(uint8_t reg) {
     digitalWrite(_csnPin, LOW);
-    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
+    _spi->beginTransaction(SPISettings(NRF24_SPI_FREQUENCY, MSBFIRST, SPI_MODE0));
     transfer(CMD_R_REGISTER | (reg & 0x1F));
     uint8_t value = transfer(0xFF);
-    SPI.endTransaction();
+    _spi->endTransaction();
     digitalWrite(_csnPin, HIGH);
     return value;
 }
@@ -123,7 +139,7 @@ void NRF24L01::scanAllChannels(uint8_t* results, int numSamples) {
         
         for (int s = 0; s < numSamples; s++) {
             setRxMode();
-            delayMicroseconds(170);  // Listen briefly
+            delayMicroseconds(kScanListenTimeUs);
             if (detectSignal()) {
                 detected++;
             }
@@ -142,25 +158,25 @@ void NRF24L01::scanAllChannels(uint8_t* results, int numSamples) {
 }
 
 uint8_t NRF24L01::transfer(uint8_t val) {
-    return SPI.transfer(val);
+    return _spi->transfer(val);
 }
 
 void NRF24L01::flushTx(void) {
     digitalWrite(_csnPin, LOW);
-    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
+    _spi->beginTransaction(SPISettings(NRF24_SPI_FREQUENCY, MSBFIRST, SPI_MODE0));
     transfer(0xE1);  // FLUSH_TX command
-    SPI.endTransaction();
+    _spi->endTransaction();
     digitalWrite(_csnPin, HIGH);
 }
 
 void NRF24L01::writeTxPayload(const uint8_t* data, uint8_t len) {
     digitalWrite(_csnPin, LOW);
-    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
+    _spi->beginTransaction(SPISettings(NRF24_SPI_FREQUENCY, MSBFIRST, SPI_MODE0));
     transfer(0xA0);  // W_TX_PAYLOAD command
     for (uint8_t i = 0; i < len; i++) {
         transfer(data[i]);
     }
-    SPI.endTransaction();
+    _spi->endTransaction();
     digitalWrite(_csnPin, HIGH);
 }
 

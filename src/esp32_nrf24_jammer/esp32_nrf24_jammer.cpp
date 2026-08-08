@@ -1,18 +1,15 @@
 // esp32_nrf24_jammer/esp32_nrf24_jammer.cpp
 #include "esp32_nrf24_jammer.h"
-#include <SPI.h>
-
-#define SPI_FREQUENCY 10E6   // 10MHz clock speed (typical for nRF24L01)
 
 // nRF24L01 register addresses (from datasheet)
-#define REG_CONFIG      0x00
-#define REG_EN_AA       0x01
-#define REG_EN_RXADDR   0x02
-#define REG_SETUP_AW    0x03
-#define REG_SETUP_RETR  0x04
-#define REG_RF_CH       0x05
-#define REG_RF_SETUP    0x06
-#define REG_STATUS      0x07
+#define REG_CONFIG       0x00
+#define REG_EN_AA        0x01
+#define REG_EN_RXADDR    0x02
+#define REG_SETUP_AW     0x03
+#define REG_SETUP_RETR   0x04
+#define REG_RF_CH        0x05
+#define REG_RF_SETUP     0x06
+#define REG_STATUS       0x07
 #define REG_OBSERVE_TX   0x08
 #define REG_RPD          0x09
 #define REG_RX_ADDR_P0   0x0A
@@ -36,6 +33,13 @@
 // 1 = print every hopped channel to Serial, 0 = periodic TX health only
 #define JAM_LOG_EVERY_CHANNEL 0
 
+namespace {
+constexpr int kScanSamplesPerChannel = 16;
+constexpr uint8_t kScanPeakHoldDecay = 4;
+constexpr uint8_t kRadioInitAttempts = 3;
+constexpr int kRadioInitRetryDelayMs = 40;
+}
+
 // Read internal ESP32 temperature in deci-Celsius for compact payload encoding.
 static int16_t readChipTempC10() {
     float tC = temperatureRead();
@@ -44,7 +48,6 @@ static int16_t readChipTempC10() {
 
 static uint8_t nextJamChannel(uint8_t current) {
 #if JAM_CHANNEL_MODE == 1
-    // Even-only channels: 0,2,4,...,124
     uint8_t ch = current;
     if (ch & 0x01) {
         ch = static_cast<uint8_t>(ch - 1);
@@ -55,7 +58,6 @@ static uint8_t nextJamChannel(uint8_t current) {
     }
     return ch;
 #elif JAM_CHANNEL_MODE == 2
-    // Odd-only channels: 1,3,5,...,125
     uint8_t ch = current;
     if ((ch & 0x01) == 0) {
         ch = static_cast<uint8_t>(ch + 1);
@@ -66,16 +68,22 @@ static uint8_t nextJamChannel(uint8_t current) {
     }
     return ch;
 #else
-    // All channels with stride 3.
     return static_cast<uint8_t>((current + 3) % 126);
 #endif
 }
 
-ESP32NRF24Jammer::ESP32NRF24Jammer(uint8_t ledPin, uint8_t csnPin, uint8_t cePin)
-    : _ledPin(ledPin), _radio(cePin, csnPin, 12, 13, 11) {   // SCK=12, MISO=13, MOSI=11
+ESP32NRF24Jammer::ESP32NRF24Jammer(int8_t ledPin, const NRF24RadioConfig& radioConfig)
+    : _ledPin(ledPin),
+      _radioConfig(radioConfig),
+      _radio(*radioConfig.spi, radioConfig.cePin, radioConfig.csnPin, radioConfig.sckPin, radioConfig.misoPin, radioConfig.mosiPin) {
 }
 
-// Dump key nRF24 registers to Serial for diagnostics
+void ESP32NRF24Jammer::_setLedColor(uint8_t red, uint8_t green, uint8_t blue) {
+    if (_ledPin >= 0) {
+        neopixelWrite(_ledPin, red, green, blue);
+    }
+}
+
 void ESP32NRF24Jammer::_printRegisters(const char* label) {
     Serial.printf("[nRF24 %s] CONFIG=0x%02X  EN_AA=0x%02X  RF_CH=0x%02X  RF_SETUP=0x%02X  STATUS=0x%02X  FIFO=0x%02X  OBSERVE_TX=0x%02X\n",
         label,
@@ -91,28 +99,57 @@ void ESP32NRF24Jammer::_printRegisters(const char* label) {
 bool ESP32NRF24Jammer::begin(void) {
     Serial.println("[nRF24] begin() starting...");
 
-    if (_radio.begin()) {
-        Serial.println("[nRF24] SPI contact OK - module responded");
-        _radio.powerDown();
-        
-        SPI.begin(12, 13, 11, -1);
-        SPI.setFrequency(SPI_FREQUENCY);
-        
-        delay(200);
-        
-        _radio.reset();
-        _setChannelInternal(_currentChannel);
-        
-        _printRegisters("INIT");
-        Serial.println("[nRF24] Initialization complete");
-        return true;
+    if (_radioConfig.spi == nullptr) {
+        Serial.println("[nRF24] ERROR: SPI bus was not configured");
+        _radioReady = false;
+        return false;
     }
+
+    for (uint8_t attempt = 1; attempt <= kRadioInitAttempts; ++attempt) {
+        if (_radio.begin()) {
+            Serial.printf("[nRF24] SPI contact OK - module responded on attempt %u\n", attempt);
+            _radio.powerDown();
+
+            delay(200);
+
+            _radio.reset();
+            _setChannelInternal(_currentChannel);
+
+            _radioReady = true;
+            _printRegisters("INIT");
+            Serial.println("[nRF24] Initialization complete");
+            return true;
+        }
+
+        Serial.printf("[nRF24] SPI contact attempt %u/%u failed\n", attempt, kRadioInitAttempts);
+        delay(kRadioInitRetryDelayMs);
+    }
+
     Serial.println("[nRF24] ERROR: SPI contact FAILED - module not found!");
-    Serial.println("[nRF24] Check: VCC=3.3V, GND, CSN=GPIO10, CE=GPIO9, SCK=12, MISO=13, MOSI=11");
+    Serial.printf("[nRF24] Check: VCC=3.3V, GND, CSN=GPIO%u, CE=GPIO%u, SCK=%u, MISO=%u, MOSI=%u\n",
+        _radioConfig.csnPin, _radioConfig.cePin, _radioConfig.sckPin, _radioConfig.misoPin, _radioConfig.mosiPin);
+    _radioReady = false;
     return false;
 }
 
+bool ESP32NRF24Jammer::isRadioReady(void) const {
+    return _radioReady;
+}
+
+void ESP32NRF24Jammer::setRadioConfig(const NRF24RadioConfig& radioConfig) {
+    _radioConfig = radioConfig;
+    if (_radioConfig.spi != nullptr) {
+        _radio.configure(*_radioConfig.spi, _radioConfig.cePin, _radioConfig.csnPin, _radioConfig.sckPin, _radioConfig.misoPin, _radioConfig.mosiPin);
+    }
+    _radioReady = false;
+}
+
 void ESP32NRF24Jammer::jammingOn(void) {
+    if (!_radioReady) {
+        Serial.println("[nRF24] jammingOn() BLOCKED - radio not ready");
+        return;
+    }
+
     if (!_isJamming && !_safeMode) {
         Serial.println("[nRF24] jammingOn() - configuring aggressive TX mode");
         _configureAggressiveMode();
@@ -120,7 +157,7 @@ void ESP32NRF24Jammer::jammingOn(void) {
         _setChannelInternal(_currentChannel);
         _isJamming = true;
         _printRegisters("JAM-ON");
-        neopixelWrite(_ledPin, 255, 0, 0);
+        _setLedColor(255, 0, 0);
     } else if (_safeMode) {
         Serial.println("[nRF24] jammingOn() BLOCKED - safe mode is enabled");
     }
@@ -142,7 +179,7 @@ void ESP32NRF24Jammer::jammingOff(void) {
         _isJamming = false;
         _printRegisters("JAM-OFF");
         Serial.println("[nRF24] Jamming stopped, radio powered down");
-        neopixelWrite(_ledPin, 0, 255, 0);
+        _setLedColor(0, 255, 0);
     }
 }
 
@@ -152,30 +189,30 @@ bool ESP32NRF24Jammer::isJamming(void) {
 
 void ESP32NRF24Jammer::updateLED(void) {
     if (_isJamming) {
-        neopixelWrite(_ledPin, 255, 0, 0);  // Red when jamming
+        _setLedColor(255, 0, 0);
     } else {
-        neopixelWrite(_ledPin, 0, 255, 0);  // Green when idle
+        _setLedColor(0, 255, 0);
     }
 }
 
 void ESP32NRF24Jammer::setSafeMode(bool enable) {
     _safeMode = enable;
-    
+
     if (_safeMode && _isJamming) {
         jammingOff();
     }
 }
 
 void ESP32NRF24Jammer::setFrequencyStep(uint32_t stepHz) {
-    if (stepHz > 0 && stepHz <= 5000000) {   // Limit to reasonable range
+    if (stepHz > 0 && stepHz <= 5000000) {
         _frequencyStepHz = stepHz;
     }
 }
 
 void ESP32NRF24Jammer::setChannel(uint16_t channel) {
-    if (channel <= 124) {   // Valid channel range for 2.4GHz ISM band
+    if (channel <= 124) {
         _currentChannel = channel;
-        
+
         if (_isJamming) {
             _setChannelInternal(_currentChannel);
         }
@@ -184,13 +221,10 @@ void ESP32NRF24Jammer::setChannel(uint16_t channel) {
 
 void ESP32NRF24Jammer::_setChannelInternal(uint16_t ch) {
     uint8_t rfch = static_cast<uint8_t>(ch);
-
-    _radio.writeRegister(REG_RF_CH, rfch);   // Write channel to RF_CH register
-
+    _radio.writeRegister(REG_RF_CH, rfch);
     _radio.pulseCE();
 }
 
-// Timed jamming implementation
 void ESP32NRF24Jammer::startTimedJam(unsigned long durationMs) {
     _timedJamDuration = durationMs;
     _timedJamStart = millis();
@@ -208,7 +242,6 @@ void ESP32NRF24Jammer::updateTimedJam(void) {
             _timedJamActive = false;
             Serial.println("Timed jam completed");
         } else {
-            // Aggressive channel hopping during timed jam
             aggressiveJamBurst();
         }
     }
@@ -219,15 +252,20 @@ bool ESP32NRF24Jammer::isTimedJamActive(void) {
 }
 
 unsigned long ESP32NRF24Jammer::getTimedJamRemaining(void) {
-    if (!_timedJamActive) return 0;
+    if (!_timedJamActive) {
+        return 0;
+    }
     unsigned long elapsed = millis() - _timedJamStart;
-    if (elapsed >= _timedJamDuration) return 0;
+    if (elapsed >= _timedJamDuration) {
+        return 0;
+    }
     return _timedJamDuration - elapsed;
 }
 
-// Aggressive jamming burst - fast channel hopping with actual TX
 void ESP32NRF24Jammer::aggressiveJamBurst(void) {
-    if (!_isJamming) return;
+    if (!_isJamming) {
+        return;
+    }
 
     static uint8_t noise[32] = {
         0xFF, 0x00, 0xAA, 0x55, 0xFF, 0x00, 0xAA, 0x55,
@@ -246,7 +284,6 @@ void ESP32NRF24Jammer::aggressiveJamBurst(void) {
 #if JAM_LOG_EVERY_CHANNEL
         Serial.printf("[nRF24 HOP] ch=%u\n", _currentChannel);
 #endif
-        // Stamp telemetry in payload: bytes 28-29 = signed deci-Celsius.
         noise[28] = static_cast<uint8_t>((tempC10 >> 8) & 0xFF);
         noise[29] = static_cast<uint8_t>(tempC10 & 0xFF);
         _radio.flushTx();
@@ -258,22 +295,20 @@ void ESP32NRF24Jammer::aggressiveJamBurst(void) {
     }
     burstCount++;
 
-    // Log TX health every 10 seconds while jamming
     if (millis() - lastBurstLog > 10000) {
         lastBurstLog = millis();
         uint8_t status = _radio.readRegister(REG_STATUS);
-        uint8_t fifo   = _radio.readRegister(REG_FIFO_STATUS);
+        uint8_t fifo = _radio.readRegister(REG_FIFO_STATUS);
         uint8_t observe = _radio.readRegister(REG_OBSERVE_TX);
         uint8_t config = _radio.readRegister(REG_CONFIG);
         Serial.printf("[nRF24 TX] bursts=%u  STATUS=0x%02X  FIFO=0x%02X  OBSERVE=0x%02X  CONFIG=0x%02X  ch=%d  temp=%.1fC\n",
             burstCount, status, fifo, observe, config, _currentChannel, tempC10 / 10.0f);
-        // Check for common problems
         if (!(config & 0x02)) {
             Serial.println("[nRF24 TX] WARNING: PWR_UP bit is 0 - radio may have reset!");
         }
         if (status & 0x10) {
             Serial.println("[nRF24 TX] WARNING: MAX_RT flag set - TX FIFO not draining");
-            _radio.writeRegister(REG_STATUS, 0x10);  // Clear flag
+            _radio.writeRegister(REG_STATUS, 0x10);
         }
         if (fifo & 0x10) {
             Serial.println("[nRF24 TX] INFO: TX FIFO empty (normal after flush)");
@@ -281,7 +316,6 @@ void ESP32NRF24Jammer::aggressiveJamBurst(void) {
     }
 }
 
-// Scanner implementation - background task wrapper
 static void scanTaskWrapper(void* param) {
     ESP32NRF24Jammer* jammer = (ESP32NRF24Jammer*)param;
     jammer->_scanTask();
@@ -289,24 +323,40 @@ static void scanTaskWrapper(void* param) {
 
 void ESP32NRF24Jammer::_scanTask(void) {
     static uint32_t scanCount = 0;
+    uint8_t localResults[126];
     Serial.println("[nRF24 SCAN] Background scan task started");
     while (_scanRunning) {
         if (!_isJamming) {
-            neopixelWrite(_ledPin, 0, 0, 255);
-            
-            _radio.scanAllChannels(_scanResults, 5);
-            _scanReady = true;
-            scanCount++;
-            
-            neopixelWrite(_ledPin, 0, 255, 0);
+            _setLedColor(0, 0, 255);
 
-            // Log scan health every 30 scans (~3 sec)
+            _radio.scanAllChannels(localResults, kScanSamplesPerChannel);
+            portENTER_CRITICAL(&_stateMux);
+            for (size_t channel = 0; channel < sizeof(_scanResults); ++channel) {
+                const uint8_t previous = _scanResults[channel];
+                const uint8_t current = localResults[channel];
+                if (current >= previous) {
+                    _scanResults[channel] = current;
+                } else {
+                    const uint8_t decayed = previous > kScanPeakHoldDecay ? previous - kScanPeakHoldDecay : 0;
+                    _scanResults[channel] = max(current, decayed);
+                }
+            }
+            _scanReady = true;
+            portEXIT_CRITICAL(&_stateMux);
+            scanCount++;
+
+            _setLedColor(0, 255, 0);
+
             if (scanCount % 30 == 0) {
                 int activeChannels = 0;
                 int maxSignal = 0;
-                for (int i = 0; i < 126; i++) {
-                    if (_scanResults[i] > 0) activeChannels++;
-                    if (_scanResults[i] > maxSignal) maxSignal = _scanResults[i];
+                for (uint8_t value : localResults) {
+                    if (value > 0) {
+                        activeChannels++;
+                    }
+                    if (value > maxSignal) {
+                        maxSignal = value;
+                    }
                 }
                 Serial.printf("[nRF24 SCAN] #%u  active_ch=%d  peak=%d%%  STATUS=0x%02X  CONFIG=0x%02X\n",
                     scanCount, activeChannels, maxSignal,
@@ -321,11 +371,16 @@ void ESP32NRF24Jammer::_scanTask(void) {
 }
 
 void ESP32NRF24Jammer::startBackgroundScan(void) {
+    if (!_radioReady) {
+        Serial.println("[nRF24 SCAN] Radio not ready, scan task not started");
+        return;
+    }
+
     if (_scanTaskHandle != nullptr) {
         Serial.println("[nRF24 SCAN] Already running, skipping start");
         return;
     }
-    
+
     Serial.println("[nRF24 SCAN] Starting background scan task on Core 1");
     _scanRunning = true;
     xTaskCreatePinnedToCore(
@@ -333,10 +388,9 @@ void ESP32NRF24Jammer::startBackgroundScan(void) {
         "ScanTask",
         4096,
         this,
-        1,  // Low priority
+        1,
         &_scanTaskHandle,
-        1   // Run on Core 1 (Arduino/app core, keeps WiFi on Core 0 clear)
-    );
+        1);
 }
 
 void ESP32NRF24Jammer::stopBackgroundScan(void) {
@@ -349,9 +403,20 @@ void ESP32NRF24Jammer::stopBackgroundScan(void) {
 }
 
 void ESP32NRF24Jammer::getScanResults(uint8_t* results) {
+    portENTER_CRITICAL(&_stateMux);
     memcpy(results, _scanResults, 126);
+    portEXIT_CRITICAL(&_stateMux);
 }
 
 bool ESP32NRF24Jammer::isScanReady(void) {
     return _scanReady;
+}
+
+void ESP32NRF24Jammer::getStateSnapshot(JammerStateSnapshot& snapshot) {
+    portENTER_CRITICAL(&_stateMux);
+    snapshot.radioReady = _radioReady;
+    snapshot.jamming = _isJamming;
+    snapshot.scanReady = _scanReady;
+    memcpy(snapshot.scanResults, _scanResults, sizeof(snapshot.scanResults));
+    portEXIT_CRITICAL(&_stateMux);
 }

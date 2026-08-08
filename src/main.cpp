@@ -1,165 +1,107 @@
-// main.cpp
 #include <Arduino.h>
-#include "esp32_nrf24_jammer/esp32_nrf24_jammer.h"
-#define ENABLE_WIFI_AP 0
-#if ENABLE_WIFI_AP
-#include "esp32_nrf24_jammer/WiFiController.h"
-#include <WiFi.h>
-#endif
 #include <SPI.h>
 
-#define LED_PIN     48  // ESP32 onboard WS2812 LED
-#define CSN_PIN     10  // Safe SPI CS pin
-#define CE_PIN      9   // Safe CE pin
-#define JAM_SWITCH_PIN 21   // External switch signal pin (kept free from nRF IRQ)
-#define JAM_SWITCH_ACTIVE_LEVEL LOW  // LOW when switch is ON (NO->pin, COM->GND)
+#include "esp32_nrf24_jammer/WaveshareTouchUI.h"
+#include "esp32_nrf24_jammer/esp32_nrf24_jammer.h"
 
-#if ENABLE_WIFI_AP
-// WiFi credentials - change these!
-#define WIFI_SSID "nacho-wifi"
-#define WIFI_PASSWORD "password123"
-#endif
+namespace {
+constexpr int8_t kLedPin = -1;
+constexpr uint8_t kRadioCePin = 38;
+constexpr uint8_t kRadioCsnPin = 39;
+constexpr uint8_t kRadioSckPin = 40;
+constexpr uint8_t kRadioMosiPin = 41;
+constexpr uint8_t kRadioMisoPin = 42;
 
-ESP32NRF24Jammer jammer(LED_PIN, CSN_PIN, CE_PIN);
-#if ENABLE_WIFI_AP
-WiFiController wifi(jammer);
-#endif
-static bool gRadioReady = false;
+SPIClass gRadioSpi(HSPI);
 
-// Apply a desired jammer state and keep LED state aligned.
-static void setJamState(bool enable) {
-    if (!gRadioReady) {
-        Serial.println("Jamming request ignored: nRF24 handshake not complete");
-        neopixelWrite(LED_PIN, 0, 0, 0);  // Off until radio handshake completes
-        return;
-    }
+struct RadioProbeCandidate {
+    uint8_t cePin;
+    uint8_t csnPin;
+    uint8_t sckPin;
+    uint8_t mosiPin;
+    uint8_t misoPin;
+};
 
-    if (enable) {
-        if (!jammer.isJamming()) {
-            jammer.jammingOn();
-            if (jammer.isJamming()) {
-                Serial.println("Jamming ON (switch)");
-                neopixelWrite(LED_PIN, 255, 0, 0);  // Red
-            } else {
-                Serial.println("Jamming ON blocked");
-                neopixelWrite(LED_PIN, 0, 255, 0);  // Green
-            }
-        }
-    } else {
-        if (jammer.isJamming()) {
-            jammer.jammingOff();
-            Serial.println("Jamming OFF (switch)");
-            neopixelWrite(LED_PIN, 0, 255, 0);  // Green
-        }
-    }
+NRF24RadioConfig makeRadioConfig(uint8_t cePin, uint8_t csnPin, uint8_t sckPin, uint8_t mosiPin, uint8_t misoPin) {
+    NRF24RadioConfig config;
+    config.spi = &gRadioSpi;
+    config.cePin = cePin;
+    config.csnPin = csnPin;
+    config.sckPin = sckPin;
+    config.misoPin = misoPin;
+    config.mosiPin = mosiPin;
+    return config;
 }
+
+NRF24RadioConfig gRadioConfig = makeRadioConfig(kRadioCePin, kRadioCsnPin, kRadioSckPin, kRadioMosiPin, kRadioMisoPin);
+
+ESP32NRF24Jammer jammer(kLedPin, gRadioConfig);
+WaveshareTouchUI ui;
+}  // namespace
 
 void setup() {
     Serial.begin(921600);
-    // Wait for USB-CDC to enumerate so serial monitor catches all output
     delay(2000);
-    Serial.println("\n\n===== FIRMWARE v3 =====");  // Version marker
-    
-    // External 3-pin switch input: NO->GPIO21, COM->GND, NC unused.
-    pinMode(JAM_SWITCH_PIN, INPUT_PULLUP);
-    
-    // Keep LED off during boot and handshake.
-    neopixelWrite(LED_PIN, 0, 0, 0);
-    
-    Serial.println("--- ESP32-S3 N16R8 RF Scanner/Jammer ---");
-    
-    // Print memory info
+
+    Serial.println("\n\n===== WAVESHARE TOUCH ANALYZER =====");
+    Serial.println("--- ESP32-S3 Touch LCD 3.5 Spectrum Analyzer ---");
+
     Serial.printf("Flash Size: %d MB\n", ESP.getFlashChipSize() / 1024 / 1024);
     Serial.printf("Free Heap: %d KB\n", ESP.getFreeHeap() / 1024);
     Serial.printf("PSRAM Size: %d KB\n", ESP.getPsramSize() / 1024);
     Serial.printf("Free PSRAM: %d KB\n", ESP.getFreePsram() / 1024);
 
-    // Initialize WiFi Access Point first (optional)
-#if ENABLE_WIFI_AP
-    if (!wifi.begin(WIFI_SSID, WIFI_PASSWORD)) {
-        Serial.println("Failed to start WiFi AP!");
+    jammer.setSafeMode(true);
+    Serial.println("[APP] TX functions disabled - analyzer mode only");
+
+    if (!ui.begin()) {
+        Serial.println("[APP] UI init failed");
     }
 
-    Serial.println("\n=== WiFi AP Started ===");
-    Serial.print("SSID: ");
-    Serial.println(WIFI_SSID);
-    Serial.print("Password: ");
-    Serial.println(WIFI_PASSWORD);
-    Serial.print("IP Address: ");
-    Serial.println(wifi.getIP());
-    Serial.println("Connect from your phone and visit: http://192.168.4.1");
-#else
-    Serial.println("\nWiFi AP disabled for this build");
-#endif
-    Serial.printf("External switch pin: GPIO%d, active level: %s\n",
-        JAM_SWITCH_PIN,
-        (JAM_SWITCH_ACTIVE_LEVEL == LOW) ? "LOW" : "HIGH");
-    
-    // Short delay before initializing radio
-    delay(500);
-    
-    // Initialize the NRF24 radio
-    Serial.println("\nInitializing NRF24L01+ radio...");
-    Serial.println("SPI Pins: SCK=12, MISO=13, MOSI=11, CSN=10, CE=9");
-    gRadioReady = jammer.begin();
-    if (!gRadioReady) {
-        Serial.println("ERROR: Failed to initialize radio! Check wiring.");
-        neopixelWrite(LED_PIN, 0, 0, 0);  // Stay off if handshake fails
-        // Continue anyway to allow WiFi access
+    Serial.println("\nProbing single nRF24L01+ radio...");
+    const RadioProbeCandidate candidates[] = {
+        {38, 39, 40, 41, 42},
+        {38, 39, 40, 42, 41},
+        {39, 38, 40, 41, 42},
+        {39, 38, 40, 42, 41},
+    };
+
+    bool radioReady = false;
+    for (const RadioProbeCandidate& candidate : candidates) {
+        gRadioConfig = makeRadioConfig(candidate.cePin, candidate.csnPin, candidate.sckPin, candidate.mosiPin, candidate.misoPin);
+        jammer.setRadioConfig(gRadioConfig);
+        Serial.printf("[APP] Trying radio pins: CE=%u CSN=%u SCK=%u MISO=%u MOSI=%u\n",
+            candidate.cePin, candidate.csnPin, candidate.sckPin, candidate.misoPin, candidate.mosiPin);
+
+        if (jammer.begin()) {
+            Serial.println("[APP] Radio initialized OK");
+            radioReady = true;
+            break;
+        }
+    }
+
+    if (radioReady) {
+        jammer.startBackgroundScan();
     } else {
-        Serial.println("Radio initialized OK");
-    }
-    
-    Serial.println("\nExternal switch controls jamming ON/OFF");
-    if (gRadioReady) {
-        neopixelWrite(LED_PIN, 0, 255, 0);  // Green = ready (handshake complete)
-    }
-
-    // Respect physical switch position at startup.
-    bool switchOn = (digitalRead(JAM_SWITCH_PIN) == JAM_SWITCH_ACTIVE_LEVEL);
-    if (gRadioReady) {
-        setJamState(switchOn);
+        Serial.println("[APP] Radio init failed on all candidate pin maps - UI will stay in offline mode");
     }
 }
 
 void loop() {
-    static bool rawSwitchOn = false;
-    static bool lastRawSwitchOn = false;
-    static bool debouncedSwitchOn = false;
-    static unsigned long lastRawChange = 0;
-    static unsigned long lastPrint = 0;
+    static unsigned long lastHeartbeatMs = 0;
 
-    // Handle WiFi requests when AP is enabled
-#if ENABLE_WIFI_AP
-    wifi.handleClient();
-#endif
-    
-    // Physical JAM switch - maintain ON/OFF state
-    bool switchState = digitalRead(JAM_SWITCH_PIN);
-    rawSwitchOn = (switchState == JAM_SWITCH_ACTIVE_LEVEL);
-    
-    // Heartbeat debug every 30 seconds
-    if (millis() - lastPrint > 30000) {
-        lastPrint = millis();
-        Serial.printf("Heap: %d KB, Jamming: %s\n", 
-            ESP.getFreeHeap() / 1024, jammer.isJamming() ? "ON" : "OFF");
-    }
-    
-    // Debounce and apply switch position.
-    if (rawSwitchOn != lastRawSwitchOn) {
-        lastRawSwitchOn = rawSwitchOn;
-        lastRawChange = millis();
+    JammerStateSnapshot snapshot;
+    jammer.getStateSnapshot(snapshot);
+    ui.update(snapshot);
+
+    if ((millis() - lastHeartbeatMs) > 30000) {
+        lastHeartbeatMs = millis();
+        Serial.printf("[APP] Heap=%d KB Radio=%s Analyzer=%s ScanReady=%s\n",
+            ESP.getFreeHeap() / 1024,
+            jammer.isRadioReady() ? "READY" : "OFFLINE",
+            "ON",
+            jammer.isScanReady() ? "YES" : "NO");
     }
 
-    if ((millis() - lastRawChange) > 35 && rawSwitchOn != debouncedSwitchOn) {
-        debouncedSwitchOn = rawSwitchOn;
-        setJamState(debouncedSwitchOn);
-    }
-
-    // Continuous jam burst while jamming
-    if (jammer.isJamming()) {
-        jammer.aggressiveJamBurst();
-    }
-
-    delay(1);  // Prevent watchdog
+    delay(1);
 }

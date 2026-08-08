@@ -1,26 +1,83 @@
-NRF24L01+     ESP32-S3
-    VCC        3V3
-    GND        GND
-    CSN        D10  (IO10 / GPIO10)
-    CE         D9   (IO9 / GPIO9)
-    SCK        D12  (IO12 / GPIO12)
-    MOSI       D11  (IO11 / GPIO11)
-    MISO       D13  (IO13 / GPIO13)
+CURRENT DEFAULT BUILD
+    Board: Waveshare ESP32-S3-Touch-LCD-3.5-C
+    PlatformIO env: waveshare_touch_35_c
+    Firmware mode: analyzer only
 
-WS2812 LED   ESP32-S3
-    VCC       3V3
-    GND       GND
-    DIN       D48  (IO48 / GPIO48 - RGB LED)
+EXTERNAL NRF24L01+PA+LNA   WAVESHARE ESP32-S3
+    VCC                    3V3
+    GND                    GND
+    CE                     GPIO38
+    CSN                    GPIO39
+    SCK                    GPIO40
+    MOSI                   GPIO41
+    MISO                   GPIO42
 
-3-PIN SWITCH (SPDT)   ESP32-S3
-    COM                  GND
-    NO                   D21  (IO21 / GPIO21)
-    NC                   Not connected
-    Firmware expects LOW on GPIO21 = switch ON (jamming)
+BOOT-TIME RADIO PROBE ORDER
+    1. CE=38  CSN=39  SCK=40  MOSI=41  MISO=42
+    2. CE=38  CSN=39  SCK=40  MOSI=42  MISO=41
+    3. CE=39  CSN=38  SCK=40  MOSI=41  MISO=42
+    4. CE=39  CSN=38  SCK=40  MOSI=42  MISO=41
 
-NOTES:
-- ESP32-S3-DevKitC-1-N16R8 (16MB Flash, 8MB PSRAM)
-- External switch on GPIO21 controls jamming ON/OFF
-- Web UI at http://192.168.4.1 shows spectrum scanner only
-- LED colors: Cyan=startup, Green=idle, Blue=scanning, Red=jamming
-- OLD PINS (GPIO 40-42) CONFLICT WITH USB-JTAG - DO NOT USE
+APRIL 5, 2026 EARLY-MORNING WIRING CHANGE NOTE
+    - The radio wiring was revised to allow the current firmware to recover from
+      combined / rearranged nRF24 lead hookups without changing code.
+    - SCK stays fixed on GPIO40.
+    - The firmware now explicitly probes both CE/CSN orderings:
+      CE=38 CSN=39 and CE=39 CSN=38.
+    - The firmware also probes both data-line orderings:
+      MOSI=41 MISO=42 and MOSI=42 MISO=41.
+    - Practical meaning: if the two control leads or the two data leads were
+      combined, crossed, or landed in the opposite order during rewiring, the
+      boot probe can still find the radio.
+    - Approximate change window: between 12:00 AM and 2:00 AM on April 5, 2026.
+
+ONBOARD WAVESHARE LCD (ST7796)
+    SCK                    GPIO5
+    MOSI                   GPIO1
+    MISO                   GPIO2
+    DC                     GPIO3
+    CS                     Not used by firmware (-1)
+    RESET                  Via TCA9554 IO expander bit 1
+    BACKLIGHT              GPIO6
+
+ONBOARD WAVESHARE TOUCH (FT6336 / FT6X36)
+    SDA                    GPIO8
+    SCL                    GPIO7
+    I2C expander address   0x20
+
+CURRENT FIRMWARE NOTES
+    - Safe mode is enabled at startup.
+    - TX / jamming entrypoints still exist in code but are blocked in the default build.
+    - Background scan starts automatically after radio detection succeeds.
+    - No external switch is used by the current default build.
+    - Onboard NeoPixel / status LED is disabled in this port (kLedPin = -1).
+    - Add local decoupling across radio VCC/GND:
+      10uF minimum, 47uF to 100uF preferred, placed at the radio module.
+    - Keep the PA/LNA antenna attached during operation.
+    - Power the radio from 3.3V only.
+
+LEGACY / OLD DEVKITC WIRING
+    This matches the older ESP32-S3-DevKitC-style setup described by the previous
+    version of this file. It is not the active default target anymore.
+
+    NRF24L01+              ESP32-S3 DevKitC
+        VCC                3V3
+        GND                GND
+        CSN                GPIO10
+        CE                 GPIO9
+        SCK                GPIO12
+        MOSI               GPIO11
+        MISO               GPIO13
+
+    WS2812 LED             ESP32-S3 DevKitC
+        VCC                3V3
+        GND                GND
+        DIN                GPIO48
+
+    3-PIN SWITCH (SPDT)    ESP32-S3 DevKitC
+        COM                GND
+        NO                 GPIO21
+        NC                 Not connected
+
+    Legacy behavior note:
+        firmware expected LOW on GPIO21 = switch ON (jamming)

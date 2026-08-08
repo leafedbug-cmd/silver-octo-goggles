@@ -8,7 +8,8 @@
 
 class NRF24L01 {
 public:
-    NRF24L01(uint8_t cePin, uint8_t csnPin, uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin);
+    NRF24L01(SPIClass& spi, uint8_t cePin, uint8_t csnPin, uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin);
+    void configure(SPIClass& spi, uint8_t cePin, uint8_t csnPin, uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin);
     
     bool begin(void);
     
@@ -30,10 +31,12 @@ public:
     void disableAutoAck(void);
     void setChannel(uint8_t ch);
     bool detectSignal(void);  // Check RPD register
-    void scanAllChannels(uint8_t* results, int numSamples = 100);    void flushTx(void);
+    void scanAllChannels(uint8_t* results, int numSamples = 100);
+    void flushTx(void);
     void writeTxPayload(const uint8_t* data, uint8_t len);
     void transmit(void);
 private:
+    SPIClass* _spi;
     uint8_t _cePin;
     uint8_t _csnPin;
     uint8_t _sckPin;
